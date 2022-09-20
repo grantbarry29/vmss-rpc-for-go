@@ -47,6 +47,7 @@ func (ins *Instance) getHostIP() error {
 
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	ins.HostIp = localAddr.IP.String()
+	fmt.Print("My host ip is: ", ins.HostIp, "\n")
 
 	return nil
 }
@@ -69,6 +70,7 @@ func (ins *Instance) getSubnet() error {
 				addr := trimSubnet(a.String())
 				if addr == ins.HostIp {
 					ins.Subnet = v.String()
+					fmt.Print("My subnet is: ", ins.Subnet, "\n")
 					return nil
 				}
 			}
