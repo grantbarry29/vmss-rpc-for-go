@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/go-ping/ping"
 )
@@ -94,8 +95,9 @@ func (ins *Instance) discoverLivePeers() error {
 			err := sendPing(peerip)
 			if err == nil {
 				ch <- peerip
+			} else {
+				ch <- ""
 			}
-			ch <- ""
 		}(ip)
 	}
 
@@ -119,6 +121,12 @@ func sendPing(ip string) error {
 	if err != nil {
 		return err
 	}
+
+	pinger.Count = 10
+	pinger.Size = 56
+	pinger.Interval = 100 * time.Millisecond
+	pinger.Timeout = 5 * time.Second
+	pinger.SetPrivileged(true)
 
 	err = pinger.Run()
 	if err != nil {
