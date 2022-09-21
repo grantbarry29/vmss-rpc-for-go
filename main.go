@@ -1,11 +1,11 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"net"
-	"os/exec"
 	"strings"
+
+	"github.com/go-ping/ping"
 )
 
 type Instance struct {
@@ -91,7 +91,7 @@ func (ins *Instance) discoverLivePeers() error {
 	ch := make(chan string, len(subnetHosts))
 	for _, ip := range subnetHosts {
 		go func(peerip string) {
-			err := ping(peerip)
+			err := sendPing(peerip)
 			if err == nil {
 				ch <- peerip
 			}
@@ -114,11 +114,17 @@ func (ins *Instance) discoverLivePeers() error {
 	return nil
 }
 
-func ping(ip string) error {
-	out, _ := exec.Command("ping", ip, "-c 5", "-i 0.5", "-w 1").Output()
-	if strings.Contains(string(out), "Destination Host Unreachable") {
-		return errors.New("Ping failed")
+func sendPing(ip string) error {
+	pinger, err := ping.NewPinger(ip)
+	if err != nil {
+		return err
 	}
+
+	err = pinger.Run()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
