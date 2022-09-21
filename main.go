@@ -1,42 +1,111 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-ping/ping"
 )
 
+const (
+	PORT = "22333"
+	TYPE = "tcp"
+)
+
 type Instance struct {
-	Subnet string
-	HostIp string
-	Peers  []string
+	mutex           sync.Mutex
+	Subnet          string
+	HostIp          string
+	RegisteredPeers map[string]bool
 }
 
 func newInstance() *Instance {
-	return &Instance{}
+	return &Instance{
+		mutex:           sync.Mutex{},
+		Subnet:          "",
+		HostIp:          "",
+		RegisteredPeers: make(map[string]bool),
+	}
 }
 
 func main() {
-	self := Instance{}
+	host := newInstance()
 
-	err := self.getHostIP()
+	err := host.getHostIP()
 	if err != nil {
 		fmt.Print(err)
 	}
 
-	err = self.getSubnet()
+	err = host.getSubnet()
 	if err != nil {
 		fmt.Print(err)
 	}
 
-	err = self.discoverLivePeers()
+	err = host.discoverLivePeers()
 	if err != nil {
 		fmt.Print(err)
 	}
 
+	host.registerWithPeers()
+
+	host.listenForPeers()
+}
+
+func (ins *Instance) registerWithPeers() {
+	for peer := range ins.RegisteredPeers {
+		go func(ip string) {
+			conn, err := net.Dial(TYPE, ip+":"+PORT)
+			if err != nil {
+				fmt.Print("Dial error: ", err, "\n")
+				return
+			}
+			defer conn.Close()
+
+			fmt.Print("sending registration to ", ip, " \n")
+			_, err = conn.Write([]byte(ins.HostIp))
+			if err != nil {
+				fmt.Print(err)
+			}
+		}(peer)
+	}
+
+}
+
+func (ins *Instance) listenForPeers() {
+	listen, err := net.Listen(TYPE, ins.HostIp+":"+PORT)
+	if err != nil {
+		fmt.Print("listen error: ", err, "\n")
+		os.Exit(1)
+	}
+	defer listen.Close()
+
+	for {
+		fmt.Print("Listening on port ", PORT, "...")
+		conn, err := listen.Accept()
+		if err != nil {
+			fmt.Print("listen error: ", err, "\n")
+			os.Exit(1)
+		}
+		go ins.handlePeerRegistration(conn)
+	}
+}
+
+func (ins *Instance) handlePeerRegistration(conn net.Conn) {
+	buffer := make([]byte, 1024)
+	_, err := conn.Read(buffer)
+	if err != nil {
+		return
+	}
+
+	peerIp := bytes.NewBuffer(buffer).String()
+	ins.RegisteredPeers[peerIp] = true
+	fmt.Print("registered new peer: ", peerIp)
 }
 
 func (ins *Instance) getHostIP() error {
@@ -95,23 +164,22 @@ func (ins *Instance) discoverLivePeers() error {
 			err := sendPing(peerip)
 			if err == nil {
 				ch <- peerip
-			} else {
-				ch <- ""
 			}
+			ch <- ""
 		}(ip)
 	}
 
 	// collect all the active peer ip's from the channel
 	var peerip string = ""
-	active := make([]string, 0)
+	ins.RegisteredPeers = make(map[string]bool)
 	for j := 0; j < len(subnetHosts); j++ {
 		peerip = <-ch
-		if peerip != "" {
-			active = append(active, peerip)
+		if peerip != "" && peerip != ins.HostIp {
+			ins.RegisteredPeers[peerip] = false
 		}
 	}
 
-	fmt.Print("number of live peers: ", len(active), "\n")
+	fmt.Print("Number of live peers: ", len(ins.RegisteredPeers), "\n")
 
 	return nil
 }
@@ -122,15 +190,23 @@ func sendPing(ip string) error {
 		return err
 	}
 
+	if err != nil {
+		return err
+	}
+
+	pinger.SetPrivileged(true)
 	pinger.Count = 10
 	pinger.Size = 56
 	pinger.Interval = 100 * time.Millisecond
-	pinger.Timeout = 5 * time.Second
-	pinger.SetPrivileged(true)
+	pinger.Timeout = 1 * time.Second
 
 	err = pinger.Run()
 	if err != nil {
 		return err
+	}
+
+	if pinger.PacketsRecv == 0 {
+		return errors.New("Ping received no packets...")
 	}
 
 	return nil
