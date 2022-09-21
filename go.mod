@@ -1,6 +1,6 @@
 module vmss-rpc-for-go
 
-go 1.17
+go 1.10
 
 require (
 	github.com/go-ping/ping v0.0.0-20210911151512-381826476871
