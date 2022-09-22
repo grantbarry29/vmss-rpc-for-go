@@ -91,16 +91,19 @@ func (ins *Instance) listenForPeers() {
 
 func (ins *Instance) handlePeerRegistration(conn net.Conn) {
 	buffer := make([]byte, 1024)
-	_, err := conn.Read(buffer)
+	size, err := conn.Read(buffer)
 	if err != nil {
 		return
 	}
 
-	peerIp := bytes.NewBuffer(buffer).String()
+	fmt.Print("size is!!!: ", size, "\n")
+
+	peerIp := bytes.NewBuffer(buffer).String()[:size]
 
 	ins.mutex.Lock()
 	if _, exists := ins.RegisteredPeers[peerIp]; !exists {
 		fmt.Print("registered new peer: ", peerIp, "\n")
+		fmt.Print("registered new peer: ", len(peerIp), "\n")
 		ins.RegisteredPeers[peerIp] = struct{}{}
 		ins.registerWithPeer(peerIp)
 	}
@@ -181,14 +184,19 @@ func (ins *Instance) registerWithPeer(ip string) {
 	conn, err := net.Dial(TYPE, ip+":"+PORT)
 	if err != nil {
 		fmt.Print("Dial error: ", err, "\n")
-		if _, exists := ins.RegisteredPeers[ip]; exists {
-			delete(ins.RegisteredPeers, ip)
+		ins.mutex.Lock()
+		fmt.Print("len 1: ", len(ip), "\n")
+		for i := range ins.RegisteredPeers {
+			fmt.Print("len 2: ", len(i), "\n")
 		}
+		delete(ins.RegisteredPeers, ip)
+		ins.mutex.Unlock()
 		return
 	}
 	defer conn.Close()
 
 	fmt.Print("sending registration to ", ip, " \n")
+
 	_, err = conn.Write([]byte(ins.HostIp))
 	if err != nil {
 		fmt.Print(err)
