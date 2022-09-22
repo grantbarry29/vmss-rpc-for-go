@@ -22,7 +22,7 @@ type Instance struct {
 	mutex           sync.Mutex
 	Subnet          string
 	HostIp          string
-	RegisteredPeers map[string]bool
+	RegisteredPeers map[string]struct{}
 }
 
 func newInstance() *Instance {
@@ -30,7 +30,7 @@ func newInstance() *Instance {
 		mutex:           sync.Mutex{},
 		Subnet:          "",
 		HostIp:          "",
-		RegisteredPeers: make(map[string]bool),
+		RegisteredPeers: make(map[string]struct{}),
 	}
 }
 
@@ -52,33 +52,27 @@ func main() {
 		fmt.Print(err)
 	}
 
-	host.registerWithPeers()
+	go host.listenForPeers()
 
-	host.listenForPeers()
+	host.loopAndShowPeers()
 }
 
-func (ins *Instance) registerWithPeers() {
-	for peer := range ins.RegisteredPeers {
-		go func(ip string) {
-			conn, err := net.Dial(TYPE, ip+":"+PORT)
-			if err != nil {
-				fmt.Print("Dial error: ", err, "\n")
-				return
-			}
-			defer conn.Close()
+func (ins *Instance) loopAndShowPeers() {
+	ticker := time.NewTicker(time.Second * 1)
 
-			fmt.Print("sending registration to ", ip, " \n")
-			_, err = conn.Write([]byte(ins.HostIp))
-			if err != nil {
-				fmt.Print(err)
-			}
-		}(peer)
+	for _ = range ticker.C {
+		ins.discoverLivePeers()
+		fmt.Print("Current registered peers: ")
+		for peer := range ins.RegisteredPeers {
+			fmt.Print(peer, " ")
+		}
+		fmt.Print("\n")
 	}
-
 }
 
 func (ins *Instance) listenForPeers() {
 	listen, err := net.Listen(TYPE, ins.HostIp+":"+PORT)
+	fmt.Print("Listening on port ", PORT, "...\n")
 	if err != nil {
 		fmt.Print("listen error: ", err, "\n")
 		os.Exit(1)
@@ -86,7 +80,6 @@ func (ins *Instance) listenForPeers() {
 	defer listen.Close()
 
 	for {
-		fmt.Print("Listening on port ", PORT, "...")
 		conn, err := listen.Accept()
 		if err != nil {
 			fmt.Print("listen error: ", err, "\n")
@@ -104,22 +97,15 @@ func (ins *Instance) handlePeerRegistration(conn net.Conn) {
 	}
 
 	peerIp := bytes.NewBuffer(buffer).String()
-	ins.RegisteredPeers[peerIp] = true
-	fmt.Print("registered new peer: ", peerIp)
-}
 
-func (ins *Instance) getHostIP() error {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		return err
+	ins.mutex.Lock()
+	if _, exists := ins.RegisteredPeers[peerIp]; !exists {
+		fmt.Print("registered new peer: ", peerIp, "\n")
+		ins.RegisteredPeers[peerIp] = struct{}{}
+		ins.registerWithPeer(peerIp)
 	}
-	defer conn.Close()
+	ins.mutex.Unlock()
 
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	ins.HostIp = localAddr.IP.String()
-	fmt.Print("My host ip is: ", ins.HostIp, "\n")
-
-	return nil
 }
 
 func (ins *Instance) getSubnet() error {
@@ -171,15 +157,54 @@ func (ins *Instance) discoverLivePeers() error {
 
 	// collect all the active peer ip's from the channel
 	var peerip string = ""
-	ins.RegisteredPeers = make(map[string]bool)
+	potentialPeers := make(map[string]struct{})
 	for j := 0; j < len(subnetHosts); j++ {
 		peerip = <-ch
 		if peerip != "" && peerip != ins.HostIp {
-			ins.RegisteredPeers[peerip] = false
+			potentialPeers[peerip] = struct{}{}
 		}
 	}
 
+	// attempt register with all potential peers
+	for peer := range potentialPeers {
+		go ins.registerWithPeer(peer)
+	}
+
+	ins.mutex.Lock()
 	fmt.Print("Number of live peers: ", len(ins.RegisteredPeers), "\n")
+	ins.mutex.Unlock()
+
+	return nil
+}
+
+func (ins *Instance) registerWithPeer(ip string) {
+	conn, err := net.Dial(TYPE, ip+":"+PORT)
+	if err != nil {
+		fmt.Print("Dial error: ", err, "\n")
+		if _, exists := ins.RegisteredPeers[ip]; exists {
+			delete(ins.RegisteredPeers, ip)
+		}
+		return
+	}
+	defer conn.Close()
+
+	fmt.Print("sending registration to ", ip, " \n")
+	_, err = conn.Write([]byte(ins.HostIp))
+	if err != nil {
+		fmt.Print(err)
+	}
+}
+
+func (ins *Instance) getHostIP() error {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	ins.HostIp = localAddr.IP.String()
+	fmt.Print("My host ip is: ", ins.HostIp, "\n")
 
 	return nil
 }
