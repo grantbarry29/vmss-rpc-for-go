@@ -2,6 +2,7 @@ package main
 
 import (
 	"vmss-rpc-for-go/mesh"
+	"vmss-rpc-for-go/rpc"
 )
 
 func main() {
@@ -9,5 +10,8 @@ func main() {
 
 	host.Init()
 
-	host.LoopAndShowPeers()
+	//host.LoopAndShowPeers()
+
+	rpc.Server()
+	rpc.Client()
 }

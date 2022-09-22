@@ -67,27 +67,21 @@ func (ins *Instance) LoopAndShowPeers() {
 	}
 }
 
-func (ins *Instance) handleAcknowledgement(conn net.Conn) {
-	peerIp, err := utility.ReadFromConnection(conn)
-	if err != nil {
-		return
+// Returns current list of peers as a list
+func (ins *Instance) Peers() []string {
+	ins.mutex.Lock()
+	defer ins.mutex.Unlock()
+
+	peers := make([]string, 0)
+	for peer := range ins.RegisteredPeers {
+		peers = append(peers, peer)
 	}
 
-	ins.registerPeer(peerIp)
+	return peers
 }
 
-func (ins *Instance) handlePeerRegistration(conn net.Conn) {
-
-	peerIp, err := utility.ReadFromConnection(conn)
-	if err != nil {
-		return
-	}
-
-	ins.registerPeer(peerIp)
-
-	utility.SendTCP(peerIp, ACKPORT, ins.HostIp, ins.HostIp, ins.unregisterPeer)
-}
-
+// Send icmp pings to all potential peers in the subnet
+// Attempt to register any living peers to mesh using TCP
 func (ins *Instance) DiscoverLivePeers() error {
 	// create list of subnet hosts
 	subnetHosts, err := utility.GetAllHosts(ins.Subnet)
@@ -122,13 +116,35 @@ func (ins *Instance) DiscoverLivePeers() error {
 		go utility.SendTCP(peer, PORT, ins.HostIp, ins.HostIp, ins.unregisterPeer)
 	}
 
-	ins.mutex.Lock()
-	fmt.Print("Number of live peers: ", len(ins.RegisteredPeers), "\n")
-	ins.mutex.Unlock()
-
 	return nil
 }
 
+// Registers peer in list of peers
+// Called when acknowledgement is received
+func (ins *Instance) handleAcknowledgement(conn net.Conn) {
+	peerIp, err := utility.ReadFromConnection(conn)
+	if err != nil {
+		return
+	}
+
+	ins.registerPeer(peerIp)
+}
+
+// Registers peer and responds with an acknowledgement msg
+// Called when registration is received
+func (ins *Instance) handlePeerRegistration(conn net.Conn) {
+	peerIp, err := utility.ReadFromConnection(conn)
+	if err != nil {
+		return
+	}
+
+	ins.registerPeer(peerIp)
+
+	// Send acknowledgement
+	utility.SendTCP(peerIp, ACKPORT, ins.HostIp, ins.HostIp, ins.unregisterPeer)
+}
+
+// Gets network subnet from network interfaces
 func (ins *Instance) getSubnet() error {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -156,6 +172,7 @@ func (ins *Instance) getSubnet() error {
 	return nil
 }
 
+// Gets default outbound IP
 func (ins *Instance) getHostIP() error {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
@@ -170,6 +187,7 @@ func (ins *Instance) getHostIP() error {
 	return nil
 }
 
+// Adds peer to state
 func (ins *Instance) registerPeer(peer string) {
 	ins.mutex.Lock()
 	ins.RegisteredPeers[peer] = struct{}{}
@@ -177,6 +195,7 @@ func (ins *Instance) registerPeer(peer string) {
 	ins.mutex.Unlock()
 }
 
+// Removes peer from state
 func (ins *Instance) unregisterPeer(peer string) {
 	ins.mutex.Lock()
 	delete(ins.RegisteredPeers, peer)
