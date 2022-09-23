@@ -2,8 +2,7 @@ package rpc
 
 import (
 	"context"
-	"flag"
-	"log"
+	"fmt"
 	"time"
 
 	pb "vmss-rpc-for-go/rpc/stubs"
@@ -12,30 +11,35 @@ import (
 )
 
 const (
-	defaultName   = "world"
-	serverAddress = "localhost:50051"
+	port = ":50051"
 )
 
-var (
-	name = flag.String("name", defaultName, "Name to greet")
-)
+type RPCClient struct {
+}
 
-func Client() {
+func NewRPCClient() *RPCClient {
+	return &RPCClient{}
+}
 
+func (*RPCClient) CallGetSendServerName(ip string, name string) error {
 	// Set up a connection to the server.
-	conn, err := grpc.Dial(serverAddress, grpc.WithInsecure())
+	conn, err := grpc.Dial(ip+port, grpc.WithInsecure())
 	if err != nil {
-		log.Fatalf("did not connect: %v", err)
+		return err
 	}
 	defer conn.Close()
 
+	// Create client
 	c := pb.NewGreeterClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	r, err := c.SayHello(ctx, &pb.HelloRequest{Name: *name})
+	// Call RPC
+	fmt.Print("Sending RPC... My unique ID is: ", name, "\n")
+	_, err = c.SayHello(ctx, &pb.HelloRequest{Name: name})
 	if err != nil {
-		log.Fatalf("could not greet: %v", err)
+		return err
 	}
-	log.Printf("Greeting: %s", r.GetMessage())
+
+	return nil
 }
